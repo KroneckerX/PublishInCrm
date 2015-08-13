@@ -1,8 +1,8 @@
-﻿using System;
+﻿using Microsoft.Xrm.Sdk;
+using System;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
-using Microsoft.Xrm.Sdk;
 
 namespace CemYabansu.PublishInCrm.Windows
 {

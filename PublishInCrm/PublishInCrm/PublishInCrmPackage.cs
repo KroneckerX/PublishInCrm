@@ -16,13 +16,12 @@ using Microsoft.Crm.Sdk.Messages;
 
 using Microsoft.VisualStudio.Shell.Interop;
 using Microsoft.VisualStudio.Shell;
-using Microsoft.Xrm.Client;
-using Microsoft.Xrm.Client.Services;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using OutputWindow = CemYabansu.PublishInCrm.Windows.OutputWindow;
 using Thread = System.Threading.Thread;
+using CemYabansu.PublishInCrm.Utility;
 
 namespace CemYabansu.PublishInCrm
 {
@@ -103,17 +102,17 @@ namespace CemYabansu.PublishInCrm
                 var userCredential = new UserCredential(solutionPath);
                 userCredential.ShowDialog();
 
-                if (string.IsNullOrEmpty(userCredential.ConnectionString))
+                if (string.IsNullOrEmpty(userCredential.Credentials?.OrganizationServiceUrl))
                 {
                     SetConnectionLabelText("Connection failed.", _error);
                     AddErrorLineToOutputWindow("Error : Connection failed.");
                     return;
                 }
-                connectionString = userCredential.ConnectionString;
+                connectionString = userCredential.Credentials?.OrganizationServiceUrl;
             }
 
             //updating/creating files one by one
-            var thread = new Thread(o => UpdateWebResources(connectionString, selectedFiles));
+            var thread = new Thread(o => UpdateWebResources(CRMCredentials.Parse(connectionString), selectedFiles));
             thread.SetApartmentState(ApartmentState.STA);
             thread.Start();
         }
@@ -213,33 +212,35 @@ namespace CemYabansu.PublishInCrm
             return string.Empty;
         }
 
-        private void UpdateWebResources(string connectionString, List<string> selectedFiles)
+        private void UpdateWebResources(CRMCredentials credentials, List<string> selectedFiles)
         {
             try
             {
                 var toBePublishedWebResources = new List<WebResource>();
-                OrganizationService orgService;
-                var crmConnection = CrmConnection.Parse(connectionString);
+                //OrganizationService orgService;
+                //var crmConnection = CrmConnection.Parse(connectionString);
                 //to escape "another assembly" exception
-                crmConnection.ProxyTypesAssembly = Assembly.GetExecutingAssembly();
+                //crmConnection.ProxyTypesAssembly = Assembly.GetExecutingAssembly();
                 var stopwatch = new Stopwatch();
                 stopwatch.Start();
-                using (orgService = new OrganizationService(crmConnection))
+                using (var factory = new PICOrganizationServiceFactory(credentials.OrganizationServiceUrl, credentials))
                 {
+                    factory.SetEnableProxies(true);
+                    var service = factory.CreateOrganizationService(null);
 
-                    SetConnectionLabelText(string.Format("Connected to : {0}", crmConnection.ServiceUri), _success);
-                    AddLineToOutputWindow(string.Format("Connected to : {0}", crmConnection.ServiceUri));
+                    SetConnectionLabelText(string.Format("Connected to : {0}", credentials.OrganizationServiceUrl), _success);
+                    AddLineToOutputWindow(string.Format("Connected to : {0}", credentials.OrganizationServiceUrl));
 
                     Dictionary<string, WebResource> toBeCreatedList;
                     Dictionary<string, WebResource> toBeUpdatedList;
 
-                    GetWebresources(orgService, selectedFiles, out toBeCreatedList, out toBeUpdatedList);
+                    GetWebresources(service, selectedFiles, out toBeCreatedList, out toBeUpdatedList);
 
-                    CreateWebresources(toBeCreatedList, orgService, toBePublishedWebResources);
+                    CreateWebresources(toBeCreatedList, service, toBePublishedWebResources);
 
-                    UpdateWebresources(toBeUpdatedList, orgService, toBePublishedWebResources);
+                    UpdateWebresources(toBeUpdatedList, service, toBePublishedWebResources);
 
-                    PublishWebResources(orgService, toBePublishedWebResources);
+                    PublishWebResources(service, toBePublishedWebResources);
                 }
                 stopwatch.Stop();
                 AddLineToOutputWindow(string.Format("Time : {0}", stopwatch.Elapsed));
@@ -251,7 +252,7 @@ namespace CemYabansu.PublishInCrm
             }
         }
 
-        private void UpdateWebresources(Dictionary<string, WebResource> toBeUpdatedList, OrganizationService orgService,
+        private void UpdateWebresources(Dictionary<string, WebResource> toBeUpdatedList, IOrganizationService orgService,
             List<WebResource> toBePublishedWebResources)
         {
             if (toBeUpdatedList.Count > 0)
@@ -268,7 +269,7 @@ namespace CemYabansu.PublishInCrm
             }
         }
 
-        private void CreateWebresources(Dictionary<string, WebResource> toBeCreatedList, OrganizationService orgService,
+        private void CreateWebresources(Dictionary<string, WebResource> toBeCreatedList, IOrganizationService orgService,
             List<WebResource> toBePublishedWebResources)
         {
             if (toBeCreatedList.Count > 0)
@@ -291,7 +292,7 @@ namespace CemYabansu.PublishInCrm
             }
         }
 
-        private void GetWebresources(OrganizationService orgService, List<string> selectedFiles, out Dictionary<string, WebResource> toBeCreatedList, out Dictionary<string, WebResource> toBeUpdatedList)
+        private void GetWebresources(IOrganizationService orgService, List<string> selectedFiles, out Dictionary<string, WebResource> toBeCreatedList, out Dictionary<string, WebResource> toBeUpdatedList)
         {
             StartGettingWebresources();
             toBeCreatedList = new Dictionary<string, WebResource>();
@@ -314,7 +315,7 @@ namespace CemYabansu.PublishInCrm
         }
 
         /// <returns>Webresource which has equal name with "filename" which with or without extension</returns>
-        private WebResource GetWebresource(OrganizationService orgService, string filename)
+        private WebResource GetWebresource(IOrganizationService orgService, string filename)
         {
             var webresourceResult = WebresourceResult(orgService, filename);
             if (webresourceResult.Entities.Count == 0)
@@ -333,7 +334,7 @@ namespace CemYabansu.PublishInCrm
             };
         }
 
-        private WebResource CreateWebResource(string fileName, OrganizationService orgService, string filePath)
+        private WebResource CreateWebResource(string fileName, IOrganizationService orgService, string filePath)
         {
             var createWebresoruce = new CreateWebResourceWindow(fileName);
             createWebresoruce.ShowDialog();
@@ -347,7 +348,7 @@ namespace CemYabansu.PublishInCrm
             return createdWebresource;
         }
 
-        private void UpdateWebResource(OrganizationService orgService, WebResource choosenWebresource, string selectedFile)
+        private void UpdateWebResource(IOrganizationService orgService, WebResource choosenWebresource, string selectedFile)
         {
             choosenWebresource.Content = GetEncodedFileContents(selectedFile);
             var updateRequest = new UpdateRequest
@@ -357,7 +358,7 @@ namespace CemYabansu.PublishInCrm
             orgService.Execute(updateRequest);
         }
 
-        private void PublishWebResources(OrganizationService orgService, List<WebResource> toBePublishedWebResources)
+        private void PublishWebResources(IOrganizationService orgService, List<WebResource> toBePublishedWebResources)
         {
             if (toBePublishedWebResources.Count < 1)
             {
@@ -386,7 +387,7 @@ namespace CemYabansu.PublishInCrm
             AddLineToOutputWindow(string.Format("Published webresources : \n\t- {0}", string.Join("\n\t- ", webResourcesNames)));
         }
 
-        private static EntityCollection WebresourceResult(OrganizationService orgService, string filename)
+        private static EntityCollection WebresourceResult(IOrganizationService orgService, string filename)
         {
             string fetchXml = string.Format(@"<fetch mapping='logical' version='1.0' >
                             <entity name='webresource' >

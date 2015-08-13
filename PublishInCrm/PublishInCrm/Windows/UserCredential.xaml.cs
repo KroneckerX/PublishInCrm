@@ -8,13 +8,12 @@ using System.Threading;
 using System.Windows;
 using System.Xml;
 using Microsoft.Crm.Sdk.Messages;
-using Microsoft.Xrm.Client;
-using Microsoft.Xrm.Client.Services;
 using Microsoft.Xrm.Sdk.Client;
 using Microsoft.Xrm.Sdk.Discovery;
 using System.Threading.Tasks;
 using System.Windows.Controls;
 using Task = System.Threading.Tasks.Task;
+using CemYabansu.PublishInCrm.Utility;
 
 //For login, I used microsoft's code which is in CRM SDK.
 
@@ -23,7 +22,8 @@ namespace CemYabansu.PublishInCrm.Windows
     public partial class UserCredential
     {
         private Dictionary<string, string> _organizationsDictionary;
-        public string ConnectionString { get; set; }
+        private string ConnectionString { get; set; }
+        public CRMCredentials Credentials { get; } = new CRMCredentials();
 
         private string _projectPath;
         private string _savePath;
@@ -62,7 +62,7 @@ namespace CemYabansu.PublishInCrm.Windows
             SetActivateToConnectionProgressRing(true);
             SetConnectionStatus("Testing connection..");
 
-            var result = await System.Threading.Tasks.Task.FromResult(TestConnection(connectionString));
+            var result = await System.Threading.Tasks.Task.FromResult(TestConnection(selectedOrganizationUrl, _domain, _username, _password));
 
             SetActivateToConnectionProgressRing(false);
             if (!result)
@@ -96,30 +96,20 @@ namespace CemYabansu.PublishInCrm.Windows
         {
             var connectionString = string.Format("Server={0}; Domain={1}; Username={2}; Password={3}",
                                                     server, domain, username, password);
-            return TestConnection(connectionString);
+            Credentials.Domain = domain;
+            Credentials.Username = username;
+            Credentials.Password = password;
+            Credentials.GenerateOrganizationServiceUrl(server);
+
+            var isOK = PICrmConnector.Test(Credentials);
+            if (isOK)
+            {
+                ConnectionString = connectionString;
+            }
+
+            return isOK;
         }
 
-        public bool TestConnection(string connectionString)
-        {
-            SetActivateToConnectionProgressRing(true);
-            try
-            {
-                var crmConnection = CrmConnection.Parse(connectionString);
-                //to escape "another assembly" exception
-                crmConnection.ProxyTypesAssembly = Assembly.GetExecutingAssembly();
-                OrganizationService orgService;
-                using (orgService = new OrganizationService(crmConnection))
-                {
-                    orgService.Execute(new WhoAmIRequest());
-                    ConnectionString = connectionString;
-                    return true;
-                }
-            }
-            catch (Exception ex)
-            {
-                return false;
-            }
-        }
 
         private void GetOrganizationsButton_Click(object sender, RoutedEventArgs e)
         {
